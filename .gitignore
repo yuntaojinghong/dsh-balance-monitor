@@ -1,0 +1,12 @@
+# Node / 运行时
+node_modules/
+*.log
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 插件运行时生成的工作区配置（含用户自定义阈值、卡片位置，不入库）
+.dsh-balance-config.json
