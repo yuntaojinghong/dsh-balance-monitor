@@ -1,0 +1,12 @@
+{
+  "threshold": 10,
+  "rechargeUrl": "https://platform.deepseek.com/top_up",
+  "forceCheck": true,
+  "showChatCard": true,
+  "notifyLow": true,
+  "autoCheckMs": 60000,
+  "forceIntervalMs": 300000,
+  "history": [],
+  "cardX": null,
+  "cardY": null
+}
