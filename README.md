@@ -195,8 +195,8 @@ check_api_balance(threshold?: number, ask_if_low?: boolean)
 | `README.md` | 项目说明（本文档） |
 | `package.json` | npm 包清单：声明 `dsh.bundle`（组合补丁）与 `dsh.client`（web 客户端入口） |
 | `cordis.patch.yml` | 组合补丁：向 profile 插入 `balance-monitor` 插件行 |
-| `lib/index.js` | **宿主插件**：余额查询、强制检查（agent/pre-step）、`check_api_balance` 工具、历史记录、配置持久化；通过 `TypertRemoteService + @Remote` 暴露 `balance` 远程服务 |
-| `lib/client.js` | **客户端插件**：悬浮余额卡片、配置页（Hero/进度条/趋势图）、系统通知；经 `ctx.remote.balance.*` 与宿主通信 |
+| `lib/index.js` | **宿主插件**：余额查询、强制检查（agent/pre-step）、`check_api_balance` 工具、历史记录、配置持久化；通过 `webServer` 注册 HTTP JSON 路由 `/balance-api/*` 供客户端调用 |
+| `lib/client.js` | **客户端插件**：悬浮余额卡片、配置页（Hero/进度条/趋势图）、系统通知；经 `fetch('/balance-api/*')` 与宿主通信 |
 | `host.js` | 动态插件版宿主源码（`cordis_define` 的 `code.host`，安装方式二用） |
 | `client.js` | 动态插件版客户端源码（`code.client`） |
 | `dsh-balance-config.example.json` | 配置文件示例 |
@@ -216,7 +216,7 @@ check_api_balance(threshold?: number, ask_if_low?: boolean)
 │ · check_api_balance 动态工具 + 余额历史记录                        │
 │ · 配置读写：宿主设置目录 dsh-balance-config.json（fs 服务）         │
 └───────────────┬──────────────────────────────────────────────────┘
-                │  Typert Remote（ctx.remote.balance.state/check/…）
+                │  HTTP JSON（fetch /balance-api/state·check·history·set-config·recharge-clicked）
 ┌───────────────┴──────────────────────────────────────────────────┐
 │ ┌ 客户端（浏览器）─────────────────────────────────────────────┐ │
 │ │ · shell.overlay 悬浮余额卡片（可拖动/限位/回弹/持久化）        │ │
@@ -255,13 +255,13 @@ A：`dsh plugin --profile web remove dsh-balance-monitor`，重启 web 生效。
 
 ## 🗺️ 路线图
 
-**已完成（v7）：**
+**已完成（v1.x）：**
 
 - [x] 配置持久化到宿主设置目录（跨会话共享、自动迁移）
 - [x] 检查频率可配置（自动查询 / 强制检查节流）
 - [x] 余额历史记录 + 配置页趋势图
 - [x] 余额不足系统通知 + 提示音（可开关）
-- [x] npm 包化，`dsh plugin add` 一键安装
+- [x] npm 包化 + `dsh plugin add` 一键安装（宿主级常驻，所有会话自动启用）
 
 **规划中：**
 
