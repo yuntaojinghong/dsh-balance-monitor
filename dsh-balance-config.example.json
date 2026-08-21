@@ -1,4 +1,5 @@
 {
+  "enabled": true,
   "threshold": 10,
   "rechargeUrl": "https://platform.deepseek.com/top_up",
   "forceCheck": true,

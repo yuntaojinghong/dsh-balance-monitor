@@ -1,5 +1,5 @@
 /**
- * dsh-balance-monitor · Client 半边源码 (v7)
+ * dsh-balance-monitor · Client 半边源码 (v8)
  *
  * 这是 cordis_define 的 `code.client` 参数所需的函数体（返回 Cordis Plugin 对象）。
  * 使用方式见 README.md「安装」章节。
@@ -7,6 +7,7 @@
  * 功能（v7）：
  *  - shell.overlay 悬浮余额小卡片：可自由拖动、限制在页面内、拖出界面自动回弹、
  *    位置自动持久化（cardX/cardY 经 balance/set-config 保存）
+ *  - 总开关：配置页主开关 + 卡片「停用」按钮；停用后卡片变「点此启用」迷你胶囊
  *  - 余额不足通知：余额首次从充足转为不足时，浏览器系统通知（Notification API）+ 提示音
  *    （WebAudio），由 notifyLow 开关控制，与卡片显隐解耦
  *  - settings.plugins.tab 插件配置页（设置 → 插件 → 余额监控）：
@@ -30,6 +31,11 @@ return {
 .dsh-balance-chip .muted { color: rgba(210,210,210,.7); }
 .dsh-balance-chip button { pointer-events: auto; cursor: pointer; border: none; background: #f39c12; color: #fff; border-radius: 999px; padding: 2px 8px; font-size: 10px; font-weight: 700; }
 .dsh-balance-chip button:hover { background: #e08e0b; }
+.dsh-balance-chip button.off-btn { background: rgba(128,128,128,.38); }
+.dsh-balance-chip button.off-btn:hover { background: rgba(255,107,107,.85); }
+.dsh-balance-chip.off { cursor: pointer; opacity: .82; }
+.dsh-balance-chip.off:hover { opacity: 1; }
+.dsh-balance-chip .on-hint { color: #4f8cff; font-weight: 700; }
 
 .bal-set { font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-primary, #e6e6e6); max-width: 620px; }
 .bal-set-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -39,6 +45,14 @@ return {
 .bal-set-live { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--dsw-alias-state-success-primary, #2ecc71); border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.3)); border-radius: 999px; padding: 3px 10px; }
 .bal-set-live i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: bal-pulse 1.6s ease-in-out infinite; }
 @keyframes bal-pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+.bal-set-live.off { color: var(--dsw-alias-label-secondary, #999); }
+.bal-set-live.off i { animation: none; }
+.bal-master { display: flex; align-items: center; gap: 14px; border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.3)); border-radius: 14px; padding: 14px 16px; background: var(--dsw-alias-bg-layer-1, rgba(128,128,128,.06)); margin-bottom: 12px; }
+.bal-master.off { border-color: var(--dsw-alias-state-warn-primary, #f39c12); }
+.bal-master-label { font-size: 14px; font-weight: 700; }
+.bal-master .bal-switch { width: 52px; height: 28px; }
+.bal-master .bal-switch-thumb { width: 22px; height: 22px; }
+.bal-master .bal-switch input:checked + .bal-switch-track .bal-switch-thumb { transform: translateX(24px); }
 
 .bal-hero { border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.3)); border-radius: 16px; padding: 18px; background: var(--dsw-alias-bg-layer-1, rgba(128,128,128,.08)); }
 .bal-hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -135,6 +149,7 @@ return {
       const [snap, setSnap] = React.useState(null)
       const [thresholdDraft, setThresholdDraft] = React.useState('')
       const [urlDraft, setUrlDraft] = React.useState('')
+      const [enabledDraft, setEnabledDraft] = React.useState(true)
       const [forceDraft, setForceDraft] = React.useState(true)
       const [cardDraft, setCardDraft] = React.useState(true)
       const [notifyDraft, setNotifyDraft] = React.useState(true)
@@ -147,6 +162,7 @@ return {
       const refreshState = () => {
         host.call('balance/state').then((s) => {
           setSnap(s)
+          if (s !== null && typeof s === 'object' && typeof s.enabled === 'boolean') setEnabledDraft(s.enabled)
           setError(null)
           setBusy(false)
         }).catch((e) => {
@@ -165,6 +181,7 @@ return {
         host.call('balance/state').then((s) => {
           setSnap(s)
           if (s !== null && typeof s === 'object') {
+            if (typeof s.enabled === 'boolean') setEnabledDraft(s.enabled)
             if (s.threshold != null) setThresholdDraft(String(s.threshold))
             if (s.rechargeUrl) setUrlDraft(s.rechargeUrl)
             if (typeof s.forceCheck === 'boolean') setForceDraft(s.forceCheck)
@@ -202,6 +219,14 @@ return {
           setBusy(false)
         })
       }
+      const toggleMaster = (checked) => {
+        setEnabledDraft(checked)
+        setBusy(true)
+        host.call('balance/set-config', { enabled: checked }).then(() => { refreshState(); loadHistory() }).catch((e) => {
+          setError('保存失败：' + String(e && e.message || e))
+          setBusy(false)
+        })
+      }
       const goRecharge = () => {
         host.call('balance/recharge-clicked').then(() => refreshState()).catch(() => {})
         if (typeof window !== 'undefined' && snap !== null && typeof snap === 'object' && snap.rechargeUrl) {
@@ -210,8 +235,10 @@ return {
       }
 
       const last = snap !== null && typeof snap === 'object' ? snap.last : null
-      let status = { text: '等待首次查询', cls: 'muted' }
+      const enabledNow = snap === null || typeof snap !== 'object' || snap.enabled !== false
+      let status = { text: enabledNow ? '等待首次查询' : '总开关已关闭', cls: 'muted' }
       if (error) status = { text: error, cls: 'err' }
+      else if (!enabledNow) status = { text: '已停用', cls: 'muted' }
       else if (snap !== null && snap.keyConfigured === false) status = { text: '未配置 API Key', cls: 'err' }
       else if (last !== null && last.ok === false) status = { text: '查询失败', cls: 'err' }
       else if (last !== null && last.balance != null) {
@@ -261,7 +288,18 @@ return {
             React.createElement('h3', { className: 'bal-set-title' }, 'API 余额监控'),
             React.createElement('div', { className: 'bal-set-sub' }, 'DeepSeek 账户余额实时监控与充值提醒'),
           ),
-          React.createElement('span', { className: 'bal-set-live' }, React.createElement('i', null), '实时'),
+          React.createElement('span', { className: 'bal-set-live' + (enabledNow ? '' : ' off') }, React.createElement('i', null), enabledNow ? '实时' : '已停用'),
+        ),
+
+        React.createElement('div', { className: 'bal-master' + (enabledDraft ? '' : ' off') },
+          React.createElement('div', null,
+            React.createElement('div', { className: 'bal-master-label' }, '启用余额监控（总开关）'),
+            React.createElement('div', { className: 'bal-set-sub' }, '关闭后：不再查询余额、不拦截任务、不弹提醒。接入其他模型服务商时可关闭。'),
+          ),
+          React.createElement('label', { className: 'bal-switch', title: '余额监控总开关' },
+            React.createElement('input', { type: 'checkbox', checked: enabledDraft, onChange: (e) => toggleMaster(e.target.checked) }),
+            React.createElement('span', { className: 'bal-switch-track' }, React.createElement('span', { className: 'bal-switch-thumb' })),
+          ),
         ),
 
         React.createElement('div', { className: 'bal-hero' },
@@ -363,7 +401,7 @@ return {
         ),
 
         React.createElement('div', { className: 'bal-actions' },
-          React.createElement('button', { className: 'bal-btn', disabled: busy, onClick: checkNow }, '↻ 立即检查'),
+          React.createElement('button', { className: 'bal-btn', disabled: busy || !enabledNow, onClick: checkNow }, '↻ 立即检查'),
           React.createElement('button', { className: 'bal-btn primary', disabled: busy, onClick: saveAll }, '保存设置'),
           React.createElement('button', { className: 'bal-btn warn', disabled: busy, onClick: goRecharge }, '去充值 ↗'),
         ),
@@ -383,6 +421,7 @@ return {
       const [pos, setPos] = React.useState(null)
       const [dragging, setDragging] = React.useState(false)
       const [size, setSize] = React.useState(null)
+      const dragMoved = React.useRef(false)
 
       const clampToViewport = (x, y, w, h) => {
         const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
@@ -399,7 +438,7 @@ return {
         host.call('balance/state').then((s) => {
           setSnap(s)
           // 余额首次转低：系统通知 + 提示音
-          const lowNow = s !== null && typeof s === 'object' && s.notifyLow === true && s.last !== null && s.last.ok === true && s.last.balance != null && s.last.balance < s.threshold
+          const lowNow = s !== null && typeof s === 'object' && s.enabled !== false && s.notifyLow === true && s.last !== null && s.last.ok === true && s.last.balance != null && s.last.balance < s.threshold
           if (lowNow && !watch.prevLow) fireLowNotification(s)
           watch.prevLow = lowNow === true
         }).catch(() => {})
@@ -418,7 +457,7 @@ return {
           } else if (typeof window !== 'undefined') {
             setPos(clampToViewport(Math.max(12, window.innerWidth - 250), 88))
           }
-          const lowNow = s !== null && typeof s === 'object' && s.notifyLow === true && s.last !== null && s.last.ok === true && s.last.balance != null && s.last.balance < s.threshold
+          const lowNow = s !== null && typeof s === 'object' && s.enabled !== false && s.notifyLow === true && s.last !== null && s.last.ok === true && s.last.balance != null && s.last.balance < s.threshold
           if (lowNow && !watch.prevLow) fireLowNotification(s)
           watch.prevLow = lowNow === true
         }).catch(() => {})
@@ -446,6 +485,23 @@ return {
 
       if (snap === null || snap.showChatCard !== true || pos === null) return null
 
+      if (snap.enabled === false) {
+        return React.createElement('div', {
+          className: 'dsh-balance-chip off',
+          style: { left: pos.x + 'px', top: pos.y + 'px' },
+          title: '余额监控已停用，点击重新启用',
+          onPointerDown: onPointerDown,
+          onClick: () => {
+            if (dragMoved.current) { dragMoved.current = false; return }
+            toggleEnabled(true)
+          },
+        },
+          React.createElement('span', null, '💤'),
+          React.createElement('span', { className: 'muted' }, '余额监控已停用'),
+          React.createElement('span', { className: 'on-hint' }, '点此启用'),
+        )
+      }
+
       const last = snap.last
       let cls = 'muted'
       let text = '尚未查询'
@@ -460,17 +516,25 @@ return {
         if (typeof window !== 'undefined' && snap.rechargeUrl) window.open(snap.rechargeUrl, '_blank', 'noopener,noreferrer')
       }
 
+      const toggleEnabled = (next) => {
+        host.call('balance/set-config', { enabled: next }).then((s) => {
+          if (s !== null && typeof s === 'object') setSnap(s)
+        }).catch(() => {})
+      }
+
       const onPointerDown = (e) => {
         if (e.button !== 0) return
         e.preventDefault()
         const rect = e.currentTarget.getBoundingClientRect()
         setSize({ w: rect.width, h: rect.height })
+        dragMoved.current = false
         const startX = e.clientX
         const startY = e.clientY
         const baseX = pos.x
         const baseY = pos.y
         setDragging(true)
         const move = (ev) => {
+          if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 6) dragMoved.current = true
           const c = clampToViewport(baseX + ev.clientX - startX, baseY + ev.clientY - startY, rect.width, rect.height)
           setPos(c)
         }
@@ -494,6 +558,12 @@ return {
         React.createElement('span', null, '💳'),
         React.createElement('span', { className: 'val ' + cls }, balanceText),
         React.createElement('span', { className: cls }, text),
+        React.createElement('button', {
+          className: 'off-btn',
+          title: '停用余额监控（接入其他模型服务商时建议关闭）',
+          onPointerDown: (e) => e.stopPropagation(),
+          onClick: () => toggleEnabled(false),
+        }, '停用'),
         React.createElement('button', {
           onPointerDown: (e) => e.stopPropagation(),
           onClick: goRecharge,

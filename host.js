@@ -1,5 +1,5 @@
 /**
- * dsh-balance-monitor · Host 半边源码 (v7)
+ * dsh-balance-monitor · Host 半边源码 (v8)
  *
  * 这是 cordis_define 的 `code.host` 参数所需的函数体（返回 Cordis Plugin 对象）。
  * 使用方式见 README.md「安装」章节。
@@ -11,6 +11,7 @@
  *  - 强制检查：监听 agent/pre-step，每个任务步骤前自动检查（节流 forceIntervalMs 可配置），
  *    余额低于阈值时通过 userQuestions 暂停询问用户（继续任务 / 去充值）；选「去充值」则拦截该步骤
  *  - 动态工具 check_api_balance，供 agent 主动检查
+ *  - 总开关 enabled：关闭后停止一切查询/拦截/提醒（接入其他模型服务商时使用）
  *  - 余额历史记录（同一分钟同值合并，最多 500 条，随配置持久化），供客户端绘制趋势图
  *  - Package 私有 RPC（balance/state、balance/check、balance/history、
  *    balance/set-config、balance/recharge-clicked）供 Client 调用
@@ -23,6 +24,7 @@ return {
   async apply(ctx) {
     // ---- 状态与持久化配置 ----
     const state = {
+      enabled: true,                                        // 总开关：关闭后停止一切查询/拦截/提醒
       threshold: 10,                                         // 默认阈值：10 元
       rechargeUrl: 'https://platform.deepseek.com/top_up',   // 充值入口
       forceCheck: true,                                      // 强制检查开关
@@ -84,13 +86,14 @@ return {
         data = await readConfigFile(workspaceRoot)
       }
       if (data !== null && typeof data === 'object') {
+        if (typeof data.enabled === 'boolean') state.enabled = data.enabled
         if (typeof data.threshold === 'number' && data.threshold >= 0) state.threshold = data.threshold
         if (typeof data.rechargeUrl === 'string' && /^https?:\/\//.test(data.rechargeUrl)) state.rechargeUrl = data.rechargeUrl
         if (typeof data.forceCheck === 'boolean') state.forceCheck = data.forceCheck
         if (typeof data.showChatCard === 'boolean') state.showChatCard = data.showChatCard
         if (typeof data.notifyLow === 'boolean') state.notifyLow = data.notifyLow
-        if (typeof data.autoCheckMs === 'number' && data.autoCheckMs >= 10000) state.autoCheckMs = Math.round(data.autoCheckMs)
-        if (typeof data.forceIntervalMs === 'number' && data.forceIntervalMs > 0) state.forceIntervalMs = Math.round(data.forceIntervalMs)
+        if (typeof data.autoCheckMs === 'number' && data.autoCheckMs >= 10000) state.autoCheckMs = Math.min(86400000, Math.round(data.autoCheckMs))
+        if (typeof data.forceIntervalMs === 'number' && data.forceIntervalMs > 0) state.forceIntervalMs = Math.min(604800000, Math.round(data.forceIntervalMs))
         if (Array.isArray(data.history)) {
           state.history = data.history.filter((h) => h !== null && typeof h === 'object' && typeof h.t === 'number' && typeof h.balance === 'number')
           if (state.history.length > 500) state.history = state.history.slice(state.history.length - 500)
@@ -111,6 +114,7 @@ return {
       if (fs === undefined || configTarget === null) return
       try {
         await fs.writeText(configTarget, JSON.stringify({
+          enabled: state.enabled,
           threshold: state.threshold,
           rechargeUrl: state.rechargeUrl,
           forceCheck: state.forceCheck,
@@ -219,6 +223,7 @@ return {
     function startAutoTick() {
       if (autoDispose) { autoDispose(); autoDispose = null }
       autoDispose = ctx.interval(() => {
+        if (state.enabled !== true) return
         queryBalance().then((r) => {
           state.last = Object.assign({}, r, { checkedAt: new Date().toISOString(), threshold: state.threshold })
           recordHistory(r)
@@ -232,6 +237,7 @@ return {
 
     // ---- 强制检查：每个任务步骤前自动检查，余额不足则暂停询问 ----
     ctx.effect(() => ctx.on('agent/pre-step', async (payload, next) => {
+      if (state.enabled !== true) return next()
       if (state.forceCheck !== true) return next()
       const now = Date.now()
       if (now - state.lastForcedCheck < state.forceIntervalMs) return next()
@@ -302,6 +308,11 @@ return {
         render: (args, value) => [{ type: 'text', text: JSON.stringify(value) }],
       },
       async execute(args, exec) {
+        if (state.enabled !== true) {
+          const checkedAt = new Date().toISOString()
+          const threshold = typeof args.threshold === 'number' && Number.isFinite(args.threshold) ? args.threshold : state.threshold
+          return { ok: false, balance: null, currency: '', threshold, belowThreshold: false, action: 'disabled', rechargeUrl: state.rechargeUrl, checkedAt, message: '余额监控插件总开关已关闭，已跳过检查。如需恢复监控，请在「设置 → 插件 → 余额监控」中重新开启总开关。', reason: 'disabled' }
+        }
         const result = await queryBalance()
         const threshold = typeof args.threshold === 'number' && Number.isFinite(args.threshold) ? args.threshold : state.threshold
         const checkedAt = new Date().toISOString()
@@ -360,6 +371,7 @@ return {
     // ---- Package 私有 RPC ----
     async function snapshot() {
       return {
+        enabled: state.enabled,
         threshold: state.threshold,
         rechargeUrl: state.rechargeUrl,
         forceCheck: state.forceCheck,
@@ -378,6 +390,9 @@ return {
     }
     ctx.effect(() => harness.handle('balance/state', async () => snapshot()))
     ctx.effect(() => harness.handle('balance/check', async () => {
+      if (state.enabled !== true) {
+        return { ok: false, reason: 'disabled', checkedAt: new Date().toISOString(), threshold: state.threshold, message: '余额监控总开关已关闭，已跳过检查。' }
+      }
       const r = await queryBalance()
       state.last = Object.assign({}, r, { checkedAt: new Date().toISOString(), threshold: state.threshold })
       recordHistory(r)
@@ -390,16 +405,17 @@ return {
     ctx.effect(() => harness.handle('balance/set-config', async (args) => {
       let restartTick = false
       if (args !== null && typeof args === 'object') {
+        if (typeof args.enabled === 'boolean') state.enabled = args.enabled
         if (typeof args.threshold === 'number' && Number.isFinite(args.threshold) && args.threshold >= 0) state.threshold = args.threshold
         if (typeof args.rechargeUrl === 'string' && /^https?:\/\//.test(args.rechargeUrl.trim())) state.rechargeUrl = args.rechargeUrl.trim()
         if (typeof args.forceCheck === 'boolean') state.forceCheck = args.forceCheck
         if (typeof args.showChatCard === 'boolean') state.showChatCard = args.showChatCard
         if (typeof args.notifyLow === 'boolean') state.notifyLow = args.notifyLow
         if (typeof args.autoCheckMs === 'number' && Number.isFinite(args.autoCheckMs) && args.autoCheckMs >= 10000) {
-          state.autoCheckMs = Math.round(args.autoCheckMs)
+          state.autoCheckMs = Math.min(86400000, Math.round(args.autoCheckMs))
           restartTick = true
         }
-        if (typeof args.forceIntervalMs === 'number' && Number.isFinite(args.forceIntervalMs) && args.forceIntervalMs >= 60000) state.forceIntervalMs = Math.round(args.forceIntervalMs)
+        if (typeof args.forceIntervalMs === 'number' && Number.isFinite(args.forceIntervalMs) && args.forceIntervalMs >= 60000) state.forceIntervalMs = Math.min(604800000, Math.round(args.forceIntervalMs))
         if (typeof args.cardX === 'number' && Number.isFinite(args.cardX)) state.cardX = Math.max(0, Math.round(args.cardX))
         if (typeof args.cardY === 'number' && Number.isFinite(args.cardY)) state.cardY = Math.max(0, Math.round(args.cardY))
       }
@@ -414,7 +430,7 @@ return {
 
     // ---- 系统提示 ----
     const sysp = ctx.get('systemPrompt')
-    if (sysp !== undefined) {
+    if (sysp !== undefined && state.enabled === true) {
       ctx.effect(() => sysp.section({
         name: 'balance-guard',
         order: 150,
