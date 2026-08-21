@@ -36,8 +36,6 @@
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
-    "host.js",
-    "client.js",
     "dsh-balance-config.example.json"
   ],
   "scripts": {

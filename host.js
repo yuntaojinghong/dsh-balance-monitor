@@ -133,12 +133,6 @@ return {
 
     await loadConfig()
 
-    function cwd() {
-      const p = ctx.get('sandboxPolicy')
-      if (p !== undefined && p.workspaceRoot) return p.workspaceRoot
-      return 'C:\\'
-    }
-
     async function resolveApiKey() {
       const creds = ctx.get('credentials')
       if (creds === undefined) return undefined
@@ -157,54 +151,48 @@ return {
       if (key === undefined) {
         return { ok: false, reason: 'NO_API_KEY', message: '未配置 DEEPSEEK_API_KEY 凭据，无法查询余额。请在 Models 设置中配置 API Key。' }
       }
-      const sub = ctx.get('subprocess')
-      if (sub === undefined) {
-        return { ok: false, reason: 'NO_SUBPROCESS', message: 'subprocess 服务不可用，无法发起余额查询。' }
-      }
-      let handle
+      let res
       try {
-        handle = sub.spawn({
-          argv: ['curl.exe', '-sS', '--max-time', '20', '-H', 'Authorization: Bearer ' + key, 'https://api.deepseek.com/user/balance'],
-          cwd: cwd(),
-          stdio: { stdin: 'ignore', stdout: { maxBytes: 65536 }, stderr: { maxBytes: 8192 } },
-          graceMs: 5000,
+        res = await fetch('https://api.deepseek.com/user/balance', {
+          method: 'GET',
+          headers: { Authorization: 'Bearer ' + key },
+          signal: AbortSignal.timeout(20000),
         })
       } catch (e) {
-        return { ok: false, reason: 'SPAWN_FAILED', message: '无法启动余额查询进程：' + String(e && e.message || e) }
+        return { ok: false, reason: 'HTTP_FAILED', message: '余额接口请求失败：' + String(e && e.message || e) }
       }
+      let text
       try {
-        const outcome = await handle.done
-        const out = handle.collected && handle.collected.stdout ? handle.collected.stdout.readFrom(0).text : ''
-        const err = handle.collected && handle.collected.stderr ? handle.collected.stderr.readFrom(0).text : ''
-        if (outcome.exitCode !== 0) {
-          return { ok: false, reason: 'HTTP_FAILED', exitCode: outcome.exitCode, message: '余额接口请求失败（exit ' + outcome.exitCode + '）：' + String(err).slice(0, 300) }
-        }
-        let data
-        try {
-          data = JSON.parse(out)
-        } catch (e) {
-          return { ok: false, reason: 'BAD_JSON', message: '余额接口返回了无法解析的内容。', body: String(out).slice(0, 500) }
-        }
-        const infos = Array.isArray(data.balance_infos) ? data.balance_infos : []
-        const info = infos.find((x) => x && x.currency === 'CNY') || infos[0] || null
-        if (!info) {
-          return { ok: false, reason: 'NO_BALANCE_INFO', message: '余额接口未返回 balance_infos。', body: String(out).slice(0, 500) }
-        }
-        const balance = Number.parseFloat(String(info.total_balance))
-        return {
-          ok: true,
-          balance: Number.isFinite(balance) ? balance : null,
-          currency: String(info.currency || ''),
-          isAvailable: data.is_available !== false,
-          raw: {
-            total: String(info.total_balance),
-            granted: String(info.granted_balance != null ? info.granted_balance : ''),
-            toppedUp: String(info.topped_up_balance != null ? info.topped_up_balance : ''),
-          },
-          message: '查询成功',
-        }
+        text = await res.text()
       } catch (e) {
-        return { ok: false, reason: 'RUN_FAILED', message: '余额查询失败：' + String(e && e.message || e) }
+        return { ok: false, reason: 'HTTP_FAILED', message: '余额接口响应读取失败：' + String(e && e.message || e) }
+      }
+      if (res.status !== 200) {
+        return { ok: false, reason: 'HTTP_FAILED', status: res.status, message: '余额接口请求失败（HTTP ' + res.status + '）：' + String(text).slice(0, 300) }
+      }
+      let data
+      try {
+        data = JSON.parse(text)
+      } catch (e) {
+        return { ok: false, reason: 'BAD_JSON', message: '余额接口返回了无法解析的内容。', body: String(text).slice(0, 500) }
+      }
+      const infos = Array.isArray(data.balance_infos) ? data.balance_infos : []
+      const info = infos.find((x) => x && x.currency === 'CNY') || infos[0] || null
+      if (!info) {
+        return { ok: false, reason: 'NO_BALANCE_INFO', message: '余额接口未返回 balance_infos。', body: String(text).slice(0, 500) }
+      }
+      const balance = Number.parseFloat(String(info.total_balance))
+      return {
+        ok: true,
+        balance: Number.isFinite(balance) ? balance : null,
+        currency: String(info.currency || ''),
+        isAvailable: data.is_available !== false,
+        raw: {
+          total: String(info.total_balance),
+          granted: String(info.granted_balance != null ? info.granted_balance : ''),
+          toppedUp: String(info.topped_up_balance != null ? info.topped_up_balance : ''),
+        },
+        message: '查询成功',
       }
     }
 
