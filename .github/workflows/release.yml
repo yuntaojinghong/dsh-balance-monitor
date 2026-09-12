@@ -6,21 +6,18 @@ on:
   workflow_dispatch:
 
 jobs:
+  # 创建 GitHub Release —— 不依赖 npm 发布，任何情况下都会执行
   release:
-    name: 发布
+    name: 创建 GitHub Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # 未配置 NPM_TOKEN 时仅创建 GitHub Release，不发布 npm
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22.x"
-          registry-url: "https://registry.npmjs.org"
 
       - name: 校验版本号一致性（tag / package.json / CHANGELOG）
         run: |
@@ -44,16 +41,33 @@ jobs:
       - name: 发布前自检
         run: npm run verify
 
-      - name: 发布到 npm
-        if: env.NODE_AUTH_TOKEN != ''
-        run: npm publish --access public
-
-      - name: 跳过 npm 发布（未配置 NPM_TOKEN）
-        if: env.NODE_AUTH_TOKEN == ''
-        run: echo "::notice::未配置 NPM_TOKEN secret，跳过 npm 发布，仅创建 GitHub Release"
-
       - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           draft: false
+
+  # 发布到 npm —— 仅在配置了 NPM_TOKEN 时执行；失败不影响上面的 Release
+  npm:
+    name: 发布到 npm
+    runs-on: ubuntu-latest
+    needs: release
+    # 注意：未配置 secret 时 secrets.NPM_TOKEN 为 undefined，
+    # 用 `!= ''` 判断会因 null != '' 为真而误执行，因此这里只做真值判断
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: 未配置 NPM_TOKEN，跳过
+        if: ${{ !env.NODE_AUTH_TOKEN }}
+        run: echo "::notice::未配置 NPM_TOKEN secret，跳过 npm 发布。配置后重跑本流程即可发布。"
+
+      - name: 发布到 npm
+        if: ${{ env.NODE_AUTH_TOKEN }}
+        run: npm publish --access public
