@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: 发布
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # 未配置 NPM_TOKEN 时仅创建 GitHub Release，不发布 npm
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: 校验版本号一致性（tag / package.json / CHANGELOG）
+        run: |
+          node -e '
+            const fs = require("fs");
+            const tag = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const cl = fs.readFileSync("CHANGELOG.md", "utf8");
+            const m = cl.match(/^##\s*\[(\d+\.\d+\.\d+)\]/m);
+            const bad = [];
+            if (pkg.version !== tag) bad.push(`package.json=${pkg.version}`);
+            if (!m) bad.push("CHANGELOG.md 缺少版本条目");
+            else if (m[1] !== tag) bad.push(`CHANGELOG=${m[1]}`);
+            if (bad.length) {
+              console.error(`版本号不一致：tag=v${tag}，${bad.join("，")}`);
+              process.exit(1);
+            }
+            console.log(`版本号一致：v${tag}`);
+          '
+
+      - name: 发布前自检
+        run: npm run verify
+
+      - name: 发布到 npm
+        if: env.NODE_AUTH_TOKEN != ''
+        run: npm publish --access public
+
+      - name: 跳过 npm 发布（未配置 NPM_TOKEN）
+        if: env.NODE_AUTH_TOKEN == ''
+        run: echo "::notice::未配置 NPM_TOKEN secret，跳过 npm 发布，仅创建 GitHub Release"
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false

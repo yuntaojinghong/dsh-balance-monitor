@@ -25,8 +25,9 @@ dsh plugin --profile web add dsh-balance-monitor
 - [项目结构](#-项目结构)
 - [工作原理](#-工作原理)
 - [常见问题](#-常见问题)
-- [路线图](#-路线图)
+- [路线图](#️-路线图)
 - [贡献指南](#-贡献指南)
+- [版本记录](#-版本记录)
 - [许可证](#-许可证)
 
 ---
@@ -96,12 +97,17 @@ dsh plugin --profile web remove dsh-balance-monitor
 ```text
 请帮我安装 dsh-balance-monitor 插件：
 1. 用 cordis_define 创建动态插件（idPrefix 使用 "balan"），
-   code.host 使用本仓库 host.js 的内容，code.client 使用 client.js 的内容；
+   code.host 使用本仓库 legacy/dynamic-plugin/host.js 的内容，
+   code.client 使用 legacy/dynamic-plugin/client.js 的内容；
 2. 定义成功后用 cordis_run 激活；
 3. 批准运行授权。
 ```
 
 动态插件随会话运行，会话结束后失效；配置与历史数据仍持久化到宿主设置目录，下次安装自动恢复。
+
+> ⚠️ 这两份源码属于**早期动态插件版（v8）**，自 v1.0.7 起已停止与新架构同步，
+> 仅保证「方式二」可按旧行为复现。差异详见 [`legacy/README.md`](./legacy/README.md)。
+> 需要完整功能（HTTP 路由、配置页趋势图等）请使用方式一。
 
 ### 方式三：本地开发（link 安装）
 
@@ -198,15 +204,19 @@ check_api_balance(threshold?: number, ask_if_low?: boolean)
 | 文件 | 作用 |
 | --- | --- |
 | `README.md` | 项目说明（本文档） |
+| `CHANGELOG.md` | 版本更新记录 |
 | `package.json` | npm 包清单：声明 `dsh.bundle`（组合补丁）与 `dsh.client`（web 客户端入口） |
 | `cordis.patch.yml` | 组合补丁：向 profile 插入 `balance-monitor` 插件行 |
 | `lib/index.js` | **宿主插件**：余额查询、强制检查（agent/pre-step）、`check_api_balance` 工具、历史记录、配置持久化；通过 `webServer` 注册 HTTP JSON 路由 `/balance-api/*` 供客户端调用 |
 | `lib/client.js` | **客户端插件**：悬浮余额卡片、配置页（Hero/进度条/趋势图）、系统通知；经 `fetch('/balance-api/*')` 与宿主通信 |
-| `host.js` | 动态插件版宿主源码（`cordis_define` 的 `code.host`，安装方式二用） |
-| `client.js` | 动态插件版客户端源码（`code.client`） |
+| `scripts/verify.js` | 自检脚本：语法检查 + 包清单一致性校验（`npm run verify`） |
 | `dsh-balance-config.example.json` | 配置文件示例 |
 | `.gitignore` | 忽略运行时配置与依赖目录 |
 | `LICENSE` | MIT 许可 |
+| `legacy/` | 历史实现归档：早期 `cordis_define` 动态插件版源码，**不再维护**（见 `legacy/README.md`） |
+| `.github/workflows/` | CI 与 tag 发版流程 |
+
+> 只有 `lib/` 是受维护的实现。`legacy/` 中的两份源码已与新架构分叉，仅用于复现 README「安装方式二」的历史行为。
 
 ---
 
@@ -272,13 +282,14 @@ A：`dsh plugin --profile web remove dsh-balance-monitor`，重启 web 生效。
 - [x] 余额不足系统通知 + 提示音（可开关）
 - [x] npm 包化 + `dsh plugin add` 一键安装（宿主级常驻，所有会话自动启用）
 - [x] 总开关（一键停用全部监控，接入其他模型服务商时不再打扰）
+- [x] 自检脚本 + CI（语法 / 包清单 / 版本号 / 密钥扫描）
+- [x] tag 自动发版流程（配置 `NPM_TOKEN` secret 后同时发布到 npm）
 
 **规划中：**
 
 - [ ] 余额每日快照与天/周视图趋势
 - [ ] 多币种 / 多账户支持
 - [ ] 通知策略增强（重复提醒间隔、声音自定义）
-- [ ] GitHub Actions 自动发布 npm
 
 ---
 
@@ -290,14 +301,26 @@ A：`dsh plugin --profile web remove dsh-balance-monitor`，重启 web 生效。
 git clone https://github.com/yuntaojinghong/dsh-balance-monitor.git
 cd dsh-balance-monitor
 
-# 语法校验
+# 自检：语法检查 + 包清单一致性（exports 指向的文件必须存在、cordis.patch.yml 包名必须一致等）
 npm run verify
+
+# 查看将要发布到 npm 的内容（不会真的发布）
+npm pack --dry-run
 
 # 本地联调（link 安装到 DSH web profile）
 dsh plugin --profile web add link:$(pwd)
 ```
 
-改动 `lib/`（npm 包版）与 `host.js` / `client.js`（动态插件版）时请保持两份实现同步。
+**只维护 `lib/`。** 早期 `host.js` / `client.js` 已归档到 `legacy/dynamic-plugin/`，不再与新架构同步——
+如果你希望它们重新对齐，欢迎提 Issue 说明使用场景，而不是直接提交同步改动。
+
+新功能请同步更新 `README.md` 的配置项表格与 `CHANGELOG.md`。
+
+---
+
+## 📄 版本记录
+
+见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ---
 
